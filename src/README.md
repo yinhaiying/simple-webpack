@@ -311,5 +311,83 @@ function createGraph(filename){
         })
     }
 }
+```
+
+#### 第七步：打包生成最后的文件
+我们的目的最后就是生成这样的一个文件：
+```javascript
+(function (modules) {
+  function exec(id) {
+    let [fn, mapping] = modules[id];
+    let exports = {};
+    fn && fn(require, exports);
+    function require(path) {
+      console.log("exports:", exports);
+      return exec(mapping[path]);
+    }
+    console.log("exports:", exports);
+    return exports;
+  }
+  exec(0);
+})({
+  4: [
+    function (require, exports, module) {
+      let action = require("./action.js").action;
+      let name = require("./name.js").name;
+      let message = `${name} is ${action}`;
+      console.log(message);
+    },
+    { "./action.js": 5, "./name.js": 6 },
+  ],
+  5: [
+    function (require, exports, module) {
+      let action = "making webpack";
+      exports.action = action;
+    },
+    {},
+  ],
+  6: [
+    function (require, exports, module) {
+      let familyName = require("./family-name.js").name;
+      exports.name = `${familyName} Rou`;
+    },
+    { "./family-name.js": 7 },
+  ],
+  7: [
+    function (require, exports, module) {
+      exports.name = "haiyingsitan";
+    },
+    {},
+  ],
+});
+```
+实现：在拿到所有模块生成的大数组之后，我们就可以将其组装成我们之前想要的形式。
+```javascript
+function createBundle(graph){
+  let modules = "";
+  graph.forEach((mod) => {
+    modules += `${mod.id}:[
+        ${mod.code},
+        ${JSON.stringify(mod.mapping)}
+    ],`;
+  });
+
+  const result = `(function(modules){
+    function exec(id) {
+        let [fn, mapping] = modules[id];
+        let exports = {};
+        fn && fn(require, exports);
+        function require(path) {
+            console.log("exports:",exports);
+            return exec(mapping[path]);
+        }
+        console.log("exports:", exports);
+        return exports;
+    }
+    exec(0);
+  })({${modules}})`;
+
+  fs.writeFileSync("../dist/bundle.js",result);
+}
 
 ```
