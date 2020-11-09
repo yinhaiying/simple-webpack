@@ -54,3 +54,22 @@ const result = babel.transformFromAstSync(ast,code,{
 });
 
 ```
+
+### 如何实现把一个ES6的文件自动转化为ES5的文件
+```javascript
+import {parse} from "@babel/parser";
+import * as babel from "@babel/core";
+
+// @ts-ignore
+import * as fs from "fs";
+
+const code = fs.readFileSync("./test.js").toString();
+const ast = parse(code,{sourceType:"module"});
+
+const result = babel.transformFromAstSync(ast,code,{
+    presets:["@babel/preset-env"]
+});
+
+fs.writeFileSync("./test.es5.js",result.code);
+
+```
