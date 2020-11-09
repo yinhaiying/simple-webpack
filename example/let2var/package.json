@@ -4,8 +4,8 @@
   "main": "index.js",
   "license": "MIT",
   "scripts": {
-    "dev":"node -r ts-node/register let_to_var.ts",
-    "dev-browser":"node -r ts-node/register --inspect-brk let_to_var.ts"
+    "dev": "node -r ts-node/register es62es5.ts",
+    "dev-browser": "node -r ts-node/register --inspect-brk es62es5.ts"
   },
   "dependencies": {
     "@babel/core": "^7.12.3",
