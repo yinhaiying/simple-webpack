@@ -25,13 +25,13 @@ modules = {
 
 function exec(id){
     let fn = module[id];
-    exports = {};
+    let exports = {};
 
     function require(path){
         // todo:
         // 根据模块路径，返回模块执行的结果
     }
-    fn(require,module.exports)
+    fn(require,exports)
 }
 
 exec(0);

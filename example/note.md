@@ -1,0 +1,226 @@
+
+
+## 一、模块打包器
+### 1.1 什么是模块打包器
+我们看官网对`webpack`的定义：webpack 是一个现代 JavaScript 应用程序的**静态模块打包器(module bundler)**。当 webpack 处理应用程序时，它会递归地构建一个依赖关系图(dependency graph)，其中包含应用程序需要的每个模块，然后将所有这些模块打包成一个或多个bundle。更加通俗地理解就是：每个文件就是一个模块，一个文件中又会引入其他文件的内容，我们最终要实现的就是以某i一个文件为入口：将它所有依赖的文件最终打包成一个文件，这就是**模块打包器**。
+### 1.2 使用webpack打包后的文件
+我们知道了模块打包器会将多个文件打包成一个文件，那么打包后的文件到底是什么样的了，我们必须知道这个才能够进行具体实现，因此我们查看以下webpack打包后的效果。
+示例：假设我们在同一个文件夹下有以下几个文件：
+**文件：index.js**
+```javascript
+let action = require("./action.js").action;   // 引入aciton.js
+let name = require("./name.js").name;         // 引入name.js
+let message = `${name} is ${action}`;
+console.log(message);
+```
+`index.js`文件中引入了`action.js`和`name.js`。
+**文件:action.js**
+```javascript
+let action = "making webpack";
+exports.action = action;
+```
+**文件:name.js**
+```javascript
+let familyName = require("./family-name.js").name;
+exports.name = `${familyName} 阿尔伯特`;
+```
+文件`name.js`又引入了`family-name.js`文件。
+**文件:family-name.js**
+```javascript
+exports.name = "haiyingsitan";
+```
+接下来我们使用webpack进行打包，并去除打包后的注释，得到如下代码：
+```javascript
+ (() => {
+
+   var __webpack_modules__ = ({
+     "./action.js": ((__unused_webpack_module, exports) => {
+       let action = "making webpack";
+       exports.action = action;
+     }),
+     "./family-name.js": ((__unused_webpack_module, exports) => {
+       exports.name = "haiyingsitan";
+     }),
+     "./name.js": ((__unused_webpack_module, exports, __webpack_require__) => {
+       let familyName = __webpack_require__( /*! ./family-name.js */ "./family-name.js").name;
+       exports.name = `${familyName} 阿尔伯特`;
+     })
+   });
+
+   var __webpack_module_cache__ = {};
+   function __webpack_require__(moduleId) {
+     if (__webpack_module_cache__[moduleId]) {
+       return __webpack_module_cache__[moduleId].exports;
+     }
+     var module = __webpack_module_cache__[moduleId] = {
+       exports: {}
+     };
+     __webpack_modules__[moduleId](module, module.exports, __webpack_require__);
+     return module.exports;
+   }
+
+   (() => {
+     let action = __webpack_require__(  "./action.js").action;
+     let name = __webpack_require__(  "./name.js").name;
+     let message = `${name} is ${action}`;
+     console.log(message);
+   })();
+
+ })();
+```
+上面的代码看起来还是有点复杂，我们进一步简化它:
+```javascript
+(() => {
+    // 获取所有的依赖
+  var modules = {
+    "./action.js": (module, exports) => {
+      let action = "making webpack";
+      exports.action = action;
+    },
+  };
+
+  // 根据模块id解析依赖
+  function __webpack_require__(moduleId) {
+    // 其他实现
+    return module.exports;
+  }
+
+  // 入口函数立即执行
+  let entryFn = () => {
+    let action = __webpack_require__("./action.js").action;
+    let name = __webpack_require__("./name.js").name;
+    let message = `${name} is ${action}`;
+    console.log(message);
+  };
+  entryFn();
+})();
+```
+我们可以发现，最终打包后就是一个立即执行函数。这个函数由三部分组成：
+1. 模块集合
+这个模块集合是所有模块的集合，以路径作为key值，模块内容作为value值。当我们需要使用某个模块时，直接从这个模块集合中进行获取即可。
+为什么需要这个模块集合了？试想一下，如果我们遇到`require("./action.js")`，那么这个`action.js`到底对应的是哪个模块了？因此，我们必须能够获取到所有的模块，并对他们进行区分(使用模块id或者模块名称)，到时候直接从这个模块集合中通过模块id或者模块名进行获取即可。
+```javascript
+  var modules = {
+    "./action.js": (module, exports) => {
+      let action = "making webpack";
+      exports.action = action;
+    },
+  };
+```
+2. 模块依赖解析器
+模块依赖解析器就是根据每个模块的模块id，然后逐渐获取到这个模块的所有依赖，最终获取到导出的exports值。
+```javascript
+   var __webpack_module_cache__ = {};
+   function __webpack_require__(moduleId) {
+     if (__webpack_module_cache__[moduleId]) {
+       return __webpack_module_cache__[moduleId].exports;
+     }
+     var module = __webpack_module_cache__[moduleId] = {
+       exports: {}
+     };
+     __webpack_modules__[moduleId](module, module.exports, __webpack_require__);
+     return module.exports;
+   }
+```
+3. 入口文件立即执行（执行模块的函数）
+我们都知道一个模块的打包，必须有一个入口文件，而且这个文件必须立即执行，才能获取到所有的依赖。
+也就是说我们需要一个执行模块的函数。
+```javascript
+  let entryFn = () => {
+    let action = __webpack_require__("./action.js").action;
+    let name = __webpack_require__("./name.js").name;
+    let message = `${name} is ${action}`;
+    console.log(message);
+  };
+  entryFn();
+```
+好了，到目前为止，我们基本知道了webpack模块打包后生成的文件是什么样的，如果我们想要实现同样的功能，只需要同时实现：模块集合，模块依赖解析器和入口函数立即执行即可。其中最关键的就是实现模块集合和模块依赖解析器。
+
+## 二、具体实现
+### 2.1 实现模块集合
+我们可以看下每个模块的具体内容：
+```javascript
+  var modules = {
+    "./action.js": (module, exports) => {
+        // 文件内容
+      let action = "making webpack";
+      exports.action = action;
+    },
+  };
+```
+事实上，模块打包器就是把文件的内容放入到一个函数中作为一个模块，然后给这个模块一个模块id(这里是直接以路径作为模块id)。为什么要把文件放入到一个函数中了，这是因为我们都知道模块化最重要的一个特点就是环境隔离，各个模块之间互不影响，试想一下，如果不对文件内容进行处理，而是直接打包到一起，那么各个模块之间定义的变量在同一作用域肯定会互相影响。而函数常常用来形成一个单独的作用域，用来隔离变量。因此，我们首先给所有文件加壳。
+**index.js模块**
+```javascript
+function(require,exports){
+    let action = require("./action.js").action;
+    let name = require("./name.js").name;
+    let message = `${name} is ${action}`;
+    console.log(message);
+}
+```
+**action.js模块**
+```javascript
+function(require,exports){
+    let action = "making webpack";
+    exports.action = action;
+}
+```
+**name.js模块**
+```javascript
+function(require,exports){
+    let familyName = require("./family-name.js").name;
+    exports.name = `${familyName} 阿尔伯特`;
+}
+```
+**family-name.js模块**。
+```javascript
+function(require,exports){
+    exports.name = "haiyingsitan";
+}
+```
+然后，将这些模块组成一个集合。这里我们直接使用序号作为每个模块的id。
+```javascript
+const modules = {
+  "./index.js":function(require,exports){
+    let action = require("./action.js").action;
+    let name = require("./name.js").name;
+    let message = `${name} is ${action}`;
+    console.log(message);
+  },
+  "./action.js": function (require, exports) {
+    let action = "making webpack";
+    exports.action = action;
+  },
+  "./name.js": function (require, exports) {
+    let familyName = require("./family-name.js").name;
+    exports.name = `${familyName} 阿尔伯特`;
+  },
+  "./family-name.js": function (require, exports) {
+    exports.name = "haiyingsitan";
+  }
+};
+```
+
+### 2.2 执行模块的函数
+我们在上面的模块对象中获得了所有模块信息，但是如何去执行一个模块了，毕竟我们必须立即执行入口文件对应的模块。
+也就是说我们需要定义一个函数来执行这些模块。我们思考以下，这个函数需要哪些信息：
+1. 必须接收模块id(通过模块id才能够获取到对应的模块函数)
+2. 必须有requrie方法
+3. 必须有exports对象
+因此，我们可以大致写出以下这个函数：
+```javascript
+const exec = function(moduleId){
+  const moduleFn = modules[moduleId];
+  const require = function(){
+      // 实现require解析
+  }
+  // 获取这个模块的导出信息
+  let exports = {}
+
+  moduleFn(require,exports);
+}
+// 从入口文件开始执行
+exec("./index.js")
+```
+我们可以发现，这个函数的功能就是通过moduleId从模块集合中获取到相对应的模块(是一个函数)，然后执行这个函数。
+但是这个函数中，通常会通过`require`引入其他模块，因此我们需要来处理这种`require`的引入。同时每个模块会通过`exports`导出内容，因此我们需要一个exports对象。接下来我们要实现的就是如何去解析`require`。
