@@ -1,5 +1,3 @@
-
-
 ## 一、模块打包器
 ### 1.1 什么是模块打包器
 我们看官网对`webpack`的定义：webpack 是一个现代 JavaScript 应用程序的**静态模块打包器(module bundler)**。当 webpack 处理应用程序时，它会递归地构建一个依赖关系图(dependency graph)，其中包含应用程序需要的每个模块，然后将所有这些模块打包成一个或多个bundle。更加通俗地理解就是：每个文件就是一个模块，一个文件中又会引入其他文件的内容，我们最终要实现的就是以某i一个文件为入口：将它所有依赖的文件最终打包成一个文件，这就是**模块打包器**。
@@ -79,7 +77,7 @@ exports.name = "haiyingsitan";
     },
   };
 
-  // 根据模块id解析依赖
+  // require对应的模块函数执行
   function __webpack_require__(moduleId) {
     // 其他实现
     return module.exports;
@@ -107,8 +105,8 @@ exports.name = "haiyingsitan";
     },
   };
 ```
-2. 模块依赖解析器
-模块依赖解析器就是根据每个模块的模块id，然后逐渐获取到这个模块的所有依赖，最终获取到导出的exports值。
+2. 模块函数执行
+每一个模块对应于一个函数，当遇到`require(xxx)`的时候实际上就是去执行引入的这个模块函数。
 ```javascript
    var __webpack_module_cache__ = {};
    function __webpack_require__(moduleId) {
@@ -124,7 +122,7 @@ exports.name = "haiyingsitan";
 ```
 3. 入口文件立即执行（执行模块的函数）
 我们都知道一个模块的打包，必须有一个入口文件，而且这个文件必须立即执行，才能获取到所有的依赖。
-也就是说我们需要一个执行模块的函数。
+其实入口文件，也是一个模块，立即执行这个模块对应的函数即可。
 ```javascript
   let entryFn = () => {
     let action = __webpack_require__("./action.js").action;
@@ -134,10 +132,22 @@ exports.name = "haiyingsitan";
   };
   entryFn();
 ```
-好了，到目前为止，我们基本知道了webpack模块打包后生成的文件是什么样的，如果我们想要实现同样的功能，只需要同时实现：模块集合，模块依赖解析器和入口函数立即执行即可。其中最关键的就是实现模块集合和模块依赖解析器。
+好了，到目前为止，我们基本知道了webpack模块打包后生成的文件是什么样的。如果我们想要实现同样的功能，只需要同时实现：模块集合，模块执行和入口函数立即执行即可。**其中最关键的就是实现模块集合和模块执行。**
+
+
 
 ## 二、具体实现
+![](https://ftp.bmp.ovh/imgs/2020/11/82d342b1b19a9623.jpg)
+
+从上面的分析中我们可以知道，我们要实现的主要包括两个部分：
+
+1. 将项目中所有的依赖生成一个大的模块集合
+2. 模块执行函数。遇到引入模块时，执行对应的函数。
+
 ### 2.1 实现模块集合
+
+#### 2.1.1 给文件内容加壳
+
 我们可以看下每个模块的具体内容：
 ```javascript
   var modules = {
@@ -148,8 +158,9 @@ exports.name = "haiyingsitan";
     },
   };
 ```
-事实上，模块打包器就是把文件的内容放入到一个函数中作为一个模块，然后给这个模块一个模块id(这里是直接以路径作为模块id)。为什么要把文件放入到一个函数中了，这是因为我们都知道模块化最重要的一个特点就是环境隔离，各个模块之间互不影响，试想一下，如果不对文件内容进行处理，而是直接打包到一起，那么各个模块之间定义的变量在同一作用域肯定会互相影响。而函数常常用来形成一个单独的作用域，用来隔离变量。因此，我们首先给所有文件加壳。
+事实上，模块打包器就是把文件的内容放入到一个函数中作为一个模块，然后给这个模块一个模块id(这里是直接以路径作为模块id)。为什么要把文件放入到一个函数中了，这是因为我们都知道模块化最重要的一个特点就是环境隔离，各个模块之间互不影响。试想一下，如果不对文件内容进行隔离处理，而是直接打包到一起，那么各个模块之间定义的变量在同一作用域肯定会互相影响。而函数常常用来形成一个单独的作用域，用来隔离变量。因此，我们首先给所有文件加壳。
 **index.js模块**
+
 ```javascript
 function(require,exports){
     let action = require("./action.js").action;
@@ -159,6 +170,7 @@ function(require,exports){
 }
 ```
 **action.js模块**
+
 ```javascript
 function(require,exports){
     let action = "making webpack";
@@ -166,6 +178,7 @@ function(require,exports){
 }
 ```
 **name.js模块**
+
 ```javascript
 function(require,exports){
     let familyName = require("./family-name.js").name;
@@ -178,7 +191,7 @@ function(require,exports){
     exports.name = "haiyingsitan";
 }
 ```
-然后，将这些模块组成一个集合。这里我们直接使用序号作为每个模块的id。
+然后，将这些模块组成一个集合。这里我们直接使用文件路径作为每个模块的id。
 ```javascript
 const modules = {
   "./index.js":function(require,exports){
@@ -200,15 +213,24 @@ const modules = {
   }
 };
 ```
-接下来我们看下如何去实现将每个文件转化成模块，最终得到一个模块集合。
+也就是说，我们最终要实现的就是这样的一个集合。
+
+到目前为止，我们要实现的功能是：
+
+1. 给每个文件内容加壳
+2. 每个模块以路径作为模块id
+3. 将加壳后的函数作为一个模块
+
+我们看下具体的实现如下：
+
 ```javascript
 const fs = require("fs");
 let modules = {};
 const fileToModule = function (path) {
   const fileContent = fs.readFileSync(path).toString();
   return {
-    id: path,
-    code: `function(require,exports){
+    id: path,                             // 这里以路径作为模块id
+    code: `function(require,exports){     // 这里加壳了
             ${fileContent.toString()};
         }`,
   };
@@ -219,12 +241,13 @@ console.log("modules=",modules);
 ```
 输出的结果为：
 ```javascript
-modules= { './index.js':
-   'function(require,exports){\n    let action = require("./action.js").action;\r\nlet name = require("./name.js").name;\r\nlet message = `${name} is ${action}`;\r\nconsole.log(message);\r\n;\n  }' }
+modules= {
+    './index.js':'function(require,exports){\n    let action = require("./action.js").action;\r\nlet name = require("./name.js").name;\r\nlet message = `${name} is ${action}`;\r\nconsole.log(message);\r\n;\n  }' 
+}
 ```
-从上面我们可以看出，我们成功地将入口文件转化成一个模块，并且将其添加到模块对象中去了。但是我们发现我们的文件中其实还依赖了`./action.js`和`./name.js`，但是我们无法获取到他们的内容。因此，我们需要处理下`require`引入的模块。也就是说要找到当前模块中的所有依赖，然后解析这些依赖将其放入模块集合中。
+从上面我们可以看出，我们成功地将入口文件转化成一个模块，并且将其添加到模块对象中去了。但是我们发现我们的文件中其实还依赖了`./action.js`和`./name.js`，然而我们无法获取到他们的模块内容。因此，我们需要处理`require`引入的模块。也就是说要找到当前模块中的所有依赖，然后解析这些依赖将其放入模块集合中。
 
-### 2.2 模块依赖解析器
+#### 2.1.2 获取当前模块的所有依赖
 接下来我们就是要实现找到一个模块中所有的依赖。
 ```javascript
 // const action = require("./action.js")
@@ -247,6 +270,7 @@ console.log(result)  // ["./action.js","./name.js"]
 ```
 我们可以顺利获取到入口文件的所有依赖，接下来我们就是要进一步去解析这些入口文件的依赖了。
 因此，我们在文件转化成模块时，最好把模块的所有依赖信息也展示出来方便处理。因此，我们修改一下`fileToModule`这个函数。
+
 ```javascript
 const fileToModule = function (path) {
   const fileContent = fs.readFileSync(path).toString();
@@ -259,8 +283,10 @@ const fileToModule = function (path) {
   }
 };
 ```
-好了，到目前为止我们能够获取到每个模块的依赖，同时我们又能够把每个依赖转化成一个对象，那么接下来就是把所有的
-对象组成一个大的模块对象。
+好了，到目前为止我们能够获取到每个模块的依赖，同时我们又能够把每个依赖转化成一个对象，那么接下来就是把所有的对象放到一个大的对象中从而得到项目中所有模块的集合。
+
+#### 2.1.3 将所有模块组成一个集合
+
 ```javascript
 function createGraph(filename) {
   let module = fileToModule(filename);
@@ -274,6 +300,7 @@ function createGraph(filename) {
       queue.push(child);
     });
   }
+    // 上面得到的是一个数组。转化成对象
   let modules = {}
   queue.forEach((item) => {
     modules[item.id] = item.code;
@@ -282,8 +309,9 @@ function createGraph(filename) {
 }
 console.log(createGraph("./index.js"));
 ```
-`createGraph`就是根据入口文件，然后一次获取到所有的依赖，每获取一个就将其添加到queue数组中，由于使用let of 进行遍历，let of会继续遍历新添加的元素，而不需要像for循环那样，需要进行处理。
+`createGraph`就是根据入口文件，然后依次获取到所有的依赖，每获取一个就将其添加到queue数组中，由于使用let of 进行遍历，let of会继续遍历新添加的元素，而不需要像for循环那样，需要进行处理。
 我们看下入口文件最终得到的模块集合:
+
 ```javascript
 {
     './index.js': 'function(require,exports){ let action = require("./action.js").action;\r\nlet name = require("./name.js").name;\r\nlet message = `${name} is ${action}`;\r\nconsole.log(message);\r\n;\n}',
@@ -293,7 +321,7 @@ console.log(createGraph("./index.js"));
 }
 ```
 
-### 2.3 执行模块的函数
+### 2.2 执行模块的函数
 我们在上面的模块对象中获得了所有模块信息，接下来我们执行入口文件对应的函数`exec`。
 ![](https://ftp.bmp.ovh/imgs/2020/11/16c8cca17aba885b.jpg)。
 从上图中我们可以看出：当我们执行入口文件对应的函数时`exec(index.js)`，它发现:
@@ -331,7 +359,7 @@ const fileToModule = function (path) {
 ```
 我们不方便去执行一个字符串，因此我们考虑把code声明成一个函数，函数里面是模块的内容，通过`eval`去执行。但是当我们写入文件时不需要这样，这里是为了方便查看。
 
-### 2.4 将打包后的文件写入指定文件
+### 2.3 将打包后的文件写入指定文件
 好了，到目前为止我们实现了一个模块打包器所需要的三个部分：模块集合，模块解析器以及模块的执行函数。最终完整的代码如下：
 ```javascript
 const fs = require("fs");
@@ -463,5 +491,5 @@ function createBundle(modules){
   //入口函数执行
   exec("./index.js");
 })()
-
 ```
+我们可以看到打包后的文件跟webpackd打包后的文件基本相同。(注意：由于目前只支持引入自定义模块，对于内置的path等无法引入，因此如果要测试打包后的文件能否正常执行，请手动在文件顶部加上path的引入)。
