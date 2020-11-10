@@ -315,7 +315,7 @@ const exec = function(moduleId){
   return exports
 }
 ```
-注意：上面的`modules[moduleId]`如果按照我们之前的数据结构获取到的实际上是一个字符串，但是我们需要它作为函数执行。因此，我们需要稍微修改一下直接文件转模块的代码。
+注意：上面的`modules[moduleId]`如果按照我们之前的数据结构获取到的实际上是一个字符串，但是我们需要它作为函数执行。因此，我们为了方便查看我们这里稍微修改一下直接文件转模块的代码。
 ```javascript
 const fileToModule = function (path) {
   console.log("path:",path)
@@ -329,9 +329,9 @@ const fileToModule = function (path) {
   };
 };
 ```
-我们不方便去执行一个字符串，因此我们考虑把code声明成一个函数，函数里面是模块的内容，通过`eval`去执行。
+我们不方便去执行一个字符串，因此我们考虑把code声明成一个函数，函数里面是模块的内容，通过`eval`去执行。但是当我们写入文件时不需要这样，这里是为了方便查看。
 
-### 2.4 小结
+### 2.4 将打包后的文件写入指定文件
 好了，到目前为止我们实现了一个模块打包器所需要的三个部分：模块集合，模块解析器以及模块的执行函数。最终完整的代码如下：
 ```javascript
 const fs = require("fs");
@@ -400,4 +400,68 @@ const exec = function (moduleId) {
 exec("./index.js");  //输出： haiyingsitan 阿尔伯特 is making webpack
 ```
 我们可以发现，顺利地得到了跟webpack相同的结果，成功地实现了模块的打包。
+接下来我们要实现的就是把我们的模块打包后生成到一个文件中。
+```javascript
+function createBundle(modules){
+  let __modules = "";
+  for (let attr in modules) {
+    __modules += `"${attr}":${modules[attr]},`;
+  }
+  const result = `(function(){
+    const modules = {${__modules}};
+    const exec = function (moduleId) {
+      const fn = modules[moduleId];
+      let exports = {};
+      const require = function (filename) {
+        const dirname = path.dirname(module.id);
+        const absolutePath = path.join(dirname, filename);
+        return exec(absolutePath);
+      };
+      fn(require, exports);
+      return exports;
+    };
+    exec("./index.js");
+  })()`;
+  fs.writeFileSync("./dist/bundle3.js", result);
+}
+```
+`createBundle`函数用于将打包后的文件写入单独的文件中。我们可以看下打包后生成的文件如下：
+```javascript
+(function () {
+  // 模块集合
+  const modules = {
+    "./index.js": function (require, exports) {
+      let action = require("./action.js").action;
+      let name = require("./name.js").name;
+      let message = `${name} is ${action}`;
+      console.log(message);;
+    },
+    "action.js": function (require, exports) {
+      let action = "making webpack";
+      exports.action = action;;
+    },
+    "name.js": function (require, exports) {
+      let familyName = require("./family-name.js").name;
+      exports.name = `${familyName} 阿尔伯特`;;
+    },
+    "family-name.js": function (require, exports) {
+      exports.name = "haiyingsitan";;
+    },
+  };
+  
+  const exec = function (moduleId) {
+    const fn = modules[moduleId];
+    let exports = {};
+    const require = function (filename) {
+      const dirname = path.dirname(module.id);
+      const absolutePath = path.join(dirname, filename);
+      return exec(absolutePath);
+    };
+    fn(require, exports);
+    return exports;
+  };
+  //入口函数执行
+  exec("./index.js");
+})()
 
+```

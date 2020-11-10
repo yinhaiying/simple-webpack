@@ -12,7 +12,7 @@
        exports.name = `${familyName} 阿尔伯特`;
      })
    });
-
+   // 执行模块
    var __webpack_module_cache__ = {};
    function __webpack_require__(moduleId) {
      if (__webpack_module_cache__[moduleId]) {
@@ -24,7 +24,7 @@
      __webpack_modules__[moduleId](module, module.exports, __webpack_require__);
      return module.exports;
    }
-
+   
    (() => {
      let action = __webpack_require__(  "./action.js").action;
      let name = __webpack_require__(  "./name.js").name;
