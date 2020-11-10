@@ -200,27 +200,204 @@ const modules = {
   }
 };
 ```
+接下来我们看下如何去实现将每个文件转化成模块，最终得到一个模块集合。
+```javascript
+const fs = require("fs");
+let modules = {};
+const fileToModule = function (path) {
+  const fileContent = fs.readFileSync(path).toString();
+  return {
+    id: path,
+    code: `function(require,exports){
+            ${fileContent.toString()};
+        }`,
+  };
+};
+let result = fileToModule("./index.js");
+modules[result["id"]] = result.code;
+console.log("modules=",modules);
+```
+输出的结果为：
+```javascript
+modules= { './index.js':
+   'function(require,exports){\n    let action = require("./action.js").action;\r\nlet name = require("./name.js").name;\r\nlet message = `${name} is ${action}`;\r\nconsole.log(message);\r\n;\n  }' }
+```
+从上面我们可以看出，我们成功地将入口文件转化成一个模块，并且将其添加到模块对象中去了。但是我们发现我们的文件中其实还依赖了`./action.js`和`./name.js`，但是我们无法获取到他们的内容。因此，我们需要处理下`require`引入的模块。也就是说要找到当前模块中的所有依赖，然后解析这些依赖将其放入模块集合中。
 
-### 2.2 执行模块的函数
-我们在上面的模块对象中获得了所有模块信息，但是如何去执行一个模块了，毕竟我们必须立即执行入口文件对应的模块。
-也就是说我们需要定义一个函数来执行这些模块。我们思考以下，这个函数需要哪些信息：
-1. 必须接收模块id(通过模块id才能够获取到对应的模块函数)
-2. 必须有requrie方法
-3. 必须有exports对象
+### 2.2 模块依赖解析器
+接下来我们就是要实现找到一个模块中所有的依赖。
+```javascript
+// const action = require("./action.js")
+function getDependencies(fileContent) {
+  let reg = /require\(['"](.+?)['"]\)/g;
+  let result = null;
+  let dependencies = [];
+  while ((result = reg.exec(fileContent))) {
+    dependencies.push(result[1]);
+  }
+  return dependencies;
+}
+```
+这里我们使用了正则判断，只要是`require("")`或者`require('')`这种格式的都当作模块引入进行处理(这种处理有点问题，我们暂时先不管，等到下面进行优化)。然后把所有的引入都放到一个数组中，从而获取到当前模块所有的依赖。
+我们使用这个函数查看下入口文件的依赖：
+```javascript
+const fileContent = fs.readFileSync(path).toString();
+let result = getDependencies(fileContent);
+console.log(result)  // ["./action.js","./name.js"]
+```
+我们可以顺利获取到入口文件的所有依赖，接下来我们就是要进一步去解析这些入口文件的依赖了。
+因此，我们在文件转化成模块时，最好把模块的所有依赖信息也展示出来方便处理。因此，我们修改一下`fileToModule`这个函数。
+```javascript
+const fileToModule = function (path) {
+  const fileContent = fs.readFileSync(path).toString();
+  return {
+      id:path,
+      dependencies:getDependencies(fileContent),   // 新增模块信息
+      code:`(require,exports) => {
+            ${fileContent.toString()};
+      }`
+  }
+};
+```
+好了，到目前为止我们能够获取到每个模块的依赖，同时我们又能够把每个依赖转化成一个对象，那么接下来就是把所有的
+对象组成一个大的模块对象。
+```javascript
+function createGraph(filename) {
+  let module = fileToModule(filename);
+  let queue = [module];
+  
+  for (let module of queue) {
+    const dirname = path.dirname(module.id);
+    module.dependencies.forEach((relativePath) => {
+      const absolutePath = path.join(dirname, relativePath);
+      const child = fileToModule(absolutePath);
+      queue.push(child);
+    });
+  }
+  let modules = {}
+  queue.forEach((item) => {
+    modules[item.id] = item.code;
+  })
+  return modules;
+}
+console.log(createGraph("./index.js"));
+```
+`createGraph`就是根据入口文件，然后一次获取到所有的依赖，每获取一个就将其添加到queue数组中，由于使用let of 进行遍历，let of会继续遍历新添加的元素，而不需要像for循环那样，需要进行处理。
+我们看下入口文件最终得到的模块集合:
+```javascript
+{
+    './index.js': 'function(require,exports){ let action = require("./action.js").action;\r\nlet name = require("./name.js").name;\r\nlet message = `${name} is ${action}`;\r\nconsole.log(message);\r\n;\n}',
+    'action.js': 'function(require,exports){let action = "making webpack";\r\nexports.action = action;;\n      }',
+    'name.js': 'function(require,exports){let familyName = require("./family-name.js").name;\r\nexports.name = `${familyName} 阿尔伯特`;;\n}',
+    'family-name.js': 'function(require,exports){exports.name = "haiyingsitan";;\n }'
+}
+```
+
+### 2.3 执行模块的函数
+我们在上面的模块对象中获得了所有模块信息，接下来我们执行入口文件对应的函数`exec`。
+![](https://ftp.bmp.ovh/imgs/2020/11/16c8cca17aba885b.jpg)。
+从上图中我们可以看出：当我们执行入口文件对应的函数时`exec(index.js)`，它发现:
+- 存在依赖`./action.js`，于是调用exec("./action.js")。这时候不存在其他依赖了，那么直接返回值。
+- 存在依赖`./name.js`，于是调用`exec("./name.js")`。
+又发现依赖`./family-name.js`,于是调用`exec("./family-name.js")`。这时候不存在其他依赖了，返回值。这条线结束。
+我们可以发现其实这就是一个递归的过程，不断查找依赖，然后执行对应的函数。
 因此，我们可以大致写出以下这个函数：
 ```javascript
 const exec = function(moduleId){
-  const moduleFn = modules[moduleId];
-  const require = function(){
-      // 实现require解析
+  const fn = modules[moduleId];  // 获取到每个id对应的函数
+  let exports = {};
+  const require = function(filename){
+     const dirname = path.dirname(module.id);
+     const absolutePath = path.join(dirname, filename);
+      return exec(absolutePath);
   }
-  // 获取这个模块的导出信息
-  let exports = {}
-
-  moduleFn(require,exports);
+  fn(require, exports);
+  return exports
 }
-// 从入口文件开始执行
-exec("./index.js")
 ```
-我们可以发现，这个函数的功能就是通过moduleId从模块集合中获取到相对应的模块(是一个函数)，然后执行这个函数。
-但是这个函数中，通常会通过`require`引入其他模块，因此我们需要来处理这种`require`的引入。同时每个模块会通过`exports`导出内容，因此我们需要一个exports对象。接下来我们要实现的就是如何去解析`require`。
+注意：上面的`modules[moduleId]`如果按照我们之前的数据结构获取到的实际上是一个字符串，但是我们需要它作为函数执行。因此，我们需要稍微修改一下直接文件转模块的代码。
+```javascript
+const fileToModule = function (path) {
+  console.log("path:",path)
+  const fileContent = fs.readFileSync(path).toString();
+  return {
+    id: path,
+    dependencies: getDependencies(fileContent),
+    code: function(require,exports) {
+      eval(fileContent.toString())   // 看这里 里面的内容用eval来执行。外面是函数声明，不是一个字符串了。
+    },
+  };
+};
+```
+我们不方便去执行一个字符串，因此我们考虑把code声明成一个函数，函数里面是模块的内容，通过`eval`去执行。
+
+### 2.4 小结
+好了，到目前为止我们实现了一个模块打包器所需要的三个部分：模块集合，模块解析器以及模块的执行函数。最终完整的代码如下：
+```javascript
+const fs = require("fs");
+const path = require("path");
+
+// 将文件转化成模块对象
+const fileToModule = function (path) {
+  const fileContent = fs.readFileSync(path).toString();
+  return {
+    id: path,
+    dependencies: getDependencies(fileContent),
+    code: function (require, exports) {
+      eval(fileContent.toString());
+    },
+  };
+};
+
+// 获取模块的所有依赖
+function getDependencies(fileContent) {
+  let reg = /require\(['"](.+?)['"]\)/g;
+  let result = null;
+  let dependencies = [];
+  while ((result = reg.exec(fileContent))) {
+    dependencies.push(result[1]);
+  }
+  return dependencies;
+}
+
+// 将所有模块以及他们的依赖转化成模块对象
+function createGraph(filename) {
+  let module = fileToModule(filename);
+  let queue = [module];
+
+  for (let module of queue) {
+    const dirname = path.dirname(module.id);
+    module.dependencies.forEach((relativePath) => {
+      const absolutePath = path.join(dirname, relativePath);
+      const child = fileToModule(absolutePath);
+      queue.push(child);
+    });
+  }
+  let modules = {};
+  queue.forEach((item) => {
+    modules[item.id] = item.code;
+  });
+  return modules;
+}
+
+let modules = createGraph("./index.js");
+
+// 执行模块函数
+const exec = function (moduleId) {
+  const fn = modules[moduleId];
+  let exports = {};
+  const require = function (filename) {
+    const dirname = path.dirname(module.id);
+    const absolutePath = path.join(dirname, filename);
+    return exec(absolutePath);
+  };
+  fn(require, exports);
+  return exports;
+};
+```
+我们从入口文件开始打包，看看能不能得到跟webpack相同的结果。
+```javascript
+exec("./index.js");  //输出： haiyingsitan 阿尔伯特 is making webpack
+```
+我们可以发现，顺利地得到了跟webpack相同的结果，成功地实现了模块的打包。
+
