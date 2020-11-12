@@ -35,7 +35,6 @@ function getDependencies(filePath) {
       ) {
         const dirname = path.dirname(filePath);
         dependencies.push(path.join(dirname, item.node.arguments[0].value));
-        console.log("dependencies", dependencies);
       }
     },
   });
@@ -50,8 +49,6 @@ function createGraph(filename) {
     const dirname = path.dirname(module.id);
     module.dependencies.forEach((relativePath) => {
       const absolutePath = path.join(dirname, relativePath);
-      console.log("queue:",queue);
-      console.log("absolutePath:",absolutePath);
       const result = queue.every((item) => {
         return item.id !== absolutePath;
       });
@@ -76,7 +73,7 @@ const exec = function (moduleId) {
   const fn = modules[moduleId];
   let exports = {};
   const require = function (filename) {
-    const dirname = path.dirname(module.id);
+    const dirname = path.dirname(moduleId);
     const absolutePath = path.join(dirname, filename);
     return exec(absolutePath);
   };
@@ -96,7 +93,7 @@ function createBundle(modules){
       const fn = modules[moduleId];
       let exports = {};
       const require = function (filename) {
-        const dirname = path.dirname(module.id);
+        const dirname = path.dirname(moduleId);
         const absolutePath = path.join(dirname, filename);
         return exec(absolutePath);
       };
