@@ -1,4 +1,4 @@
-// 转义后的b.js
+// 这个文件是用来分析转义后的b.js
 "use strict";
     Object.defineProperty(exports, "__esModule", {
         value: true
